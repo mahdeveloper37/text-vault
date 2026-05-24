@@ -313,7 +313,7 @@ async function startGame(id) {
 
   try {
     // Fetch the story file (serve from same directory as index.html)
-    const response = await fetch(`./${g.file}?v=${Date.now()}`);
+    const response = await fetch(`./scripts/${g.file}?v=${Date.now()}`);
     if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${g.file}`);
     const buffer = await response.arrayBuffer();
 
