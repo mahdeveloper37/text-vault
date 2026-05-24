@@ -652,54 +652,61 @@ let currentEngine = null;
 async function startGame(id) {
   const g = GAMES.find(x => x.id === id);
   
-  // UI Cleanup
+  // UI Setup
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelector('main').style.display = 'none';
-  const player = document.getElementById('game-player');
-  player.classList.add('active');
+  document.getElementById('game-player').classList.add('active');
   document.getElementById('game-screen').innerHTML = '';
-  document.getElementById('status-score').textContent = 'BOOTING...';
 
   try {
-    // 1. Fetch with a timestamp to force the browser to ignore its cache
     const response = await fetch(`./scripts/${g.file}?v=${Date.now()}`);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    
     const buffer = await response.arrayBuffer();
     const data = new Uint8Array(buffer);
 
-    // 2. Initialize the Engine FIRST
+    // 1. ADVANCED DIAGNOSTICS
+    print('--- ENGINE COLD BOOT ---', 'system');
+    print(`Load Address: ${g.file}`, 'system');
+    print(`Actual Size: ${data.length} bytes`, 'system');
+    
+    // Z-Machine Files store their expected length at offset 0x1A (divided by 2 or 4)
+    const expectedSize = (data[26] << 8 | data[27]) * 2; 
+    if (expectedSize > 0 && data.length < expectedSize) {
+        print(`CRITICAL: File is truncated!`, 'error');
+        print(`Expected: ${expectedSize} bytes | Got: ${data.length}`, 'error');
+    }
+
+    // 2. INITIALIZE ENGINE
     currentEngine = new ZVM();
 
-    // 3. ATTACH THE UI IMMEDIATELY (Before calling .init)
-    // This gives the engine a "voice" so it won't crash when reporting errors
-    currentEngine.ui = {
-      fatal_error: function(msg) { 
-        print("--- ENGINE HALTED ---", 'error');
+    // 3. ATTACH UI (Universal Method)
+    const myUI = {
+      fatal_error: (msg) => { 
+        print("!!! ENGINE FATAL ERROR !!!", 'error');
         print(msg, 'error'); 
       },
-      output: function(text) { print(text, 'room-desc'); },
-      updateStatus: function(location, score, moves) {
-        document.getElementById('status-location').textContent = 'LOCATION: ' + location;
-        document.getElementById('status-score').textContent = `SCORE: ${score} | MOVES: ${moves}`;
+      output: (text) => print(text, 'room-desc'),
+      updateStatus: (loc, sc, mv) => {
+        document.getElementById('status-location').textContent = 'LOCATION: ' + loc;
+        document.getElementById('status-score').textContent = `SCORE: ${sc} | MOVES: ${mv}`;
       },
-      // Essential empty functions to prevent 'undefined' errors during boot
-      read: function(comms) { /* handle input */ },
-      save: function() { return 0; },
-      restore: function() { return 0; }
+      read: (comms) => { /* input handler */ },
+      save: () => 0, restore: () => 0
     };
 
-    // 4. Now that the UI exists, try to load the data
-    print('Loading game memory...', 'system');
+    // Force attach to both possible property names used by different ZVM versions
+    currentEngine.ui = myUI;
+    currentEngine.set_ui?.(myUI); 
+
+    // 4. BOOT
+    print('Checking Z-Code integrity...', 'system');
     currentEngine.init(data);
-    
-    print('Starting Z-Machine...', 'system');
+    print('Running...', 'success');
     currentEngine.run();
     
     document.getElementById('game-input').focus();
     
   } catch(error) {
-    print('SYSTEM ERROR: ' + error.message, 'error');
+    print('BOOT FAILURE: ' + error.message, 'error');
     console.error(error);
   }
 }
