@@ -652,61 +652,55 @@ let currentEngine = null;
 async function startGame(id) {
   const g = GAMES.find(x => x.id === id);
   
+  // UI Cleanup
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
   document.querySelector('main').style.display = 'none';
-  
   const player = document.getElementById('game-player');
   player.classList.add('active');
-  document.getElementById('game-title-bar').textContent = '▶ ' + g.title;
   document.getElementById('game-screen').innerHTML = '';
-  document.getElementById('status-score').textContent = 'DIAGNOSTIC MODE...';
+  document.getElementById('status-score').textContent = 'BOOTING...';
 
   try {
-    // 1. Fetch with a timestamp to completely bypass browser caching
-    const cacheBuster = Date.now();
-    const response = await fetch('./scripts/' + g.file + '?v=' + cacheBuster);
-    if (!response.ok) throw new Error("Could not find " + g.file + " (HTTP " + response.status + ")");
+    // 1. Fetch with a timestamp to force the browser to ignore its cache
+    const response = await fetch(`./scripts/${g.file}?v=${Date.now()}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     
     const buffer = await response.arrayBuffer();
     const data = new Uint8Array(buffer);
-    
-    // 2. DIAGNOSTIC PRINT
-    const hexBytes = Array.from(data.slice(0, 10)).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-    print('--- FILE DIAGNOSTICS ---', 'system');
-    print('FILE SIZE: ' + data.length + ' bytes', 'system');
-    print('FIRST 10 BYTES: ' + hexBytes, 'system');
-    
-    if (data[0] !== 3) {
-        print('SYSTEM ERROR: First byte is NOT 03.', 'error');
-        print('This file is corrupted. Git or your text editor has modified the binary data.', 'error');
-        return; // Stop here before the emulator crashes
-    }
-    
-    print('FILE IS VALID! Booting Z-Machine...', 'success');
-    print('------------------------', 'system');
-    
-    // 3. Initialize the Engine
+
+    // 2. Initialize the Engine FIRST
     currentEngine = new ZVM();
-    
-    // Define the error handler so it prints nicely instead of throwing "undefined"
+
+    // 3. ATTACH THE UI IMMEDIATELY (Before calling .init)
+    // This gives the engine a "voice" so it won't crash when reporting errors
     currentEngine.ui = {
-        fatal_error: function(msg) { print("EMULATOR CRASH: " + msg, 'error'); }
-    };
-    
-    currentEngine.output = function(text) { print(text, 'room-desc'); };
-    currentEngine.updateStatus = function(location, score, moves) {
+      fatal_error: function(msg) { 
+        print("--- ENGINE HALTED ---", 'error');
+        print(msg, 'error'); 
+      },
+      output: function(text) { print(text, 'room-desc'); },
+      updateStatus: function(location, score, moves) {
         document.getElementById('status-location').textContent = 'LOCATION: ' + location;
         document.getElementById('status-score').textContent = `SCORE: ${score} | MOVES: ${moves}`;
+      },
+      // Essential empty functions to prevent 'undefined' errors during boot
+      read: function(comms) { /* handle input */ },
+      save: function() { return 0; },
+      restore: function() { return 0; }
     };
 
+    // 4. Now that the UI exists, try to load the data
+    print('Loading game memory...', 'system');
     currentEngine.init(data);
+    
+    print('Starting Z-Machine...', 'system');
     currentEngine.run();
     
     document.getElementById('game-input').focus();
     
   } catch(error) {
     print('SYSTEM ERROR: ' + error.message, 'error');
+    console.error(error);
   }
 }
 
