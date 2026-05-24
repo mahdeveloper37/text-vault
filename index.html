@@ -166,19 +166,30 @@
 <script>
 const GAMES = [
   { id: 'zork1', title: 'ZORK I: THE GREAT UNDERGROUND EMPIRE', author: 'Infocom', file: 'zork1.z3' },
-  { id: 'zork1_v5', title: 'ZORK I (Version 5 Edition)', author: 'Infocom', file: 'zork1.z5' }
 ];
 
-let currentEngine = null;
+// ─── STATE ──────────────────────────────────────────────────────────────────
+let vm = null;
+let inputResolve = null;  // holds the resolve() for the pending input Promise
+let outputBuffer = '';
 
+// ─── UI HELPERS ─────────────────────────────────────────────────────────────
 function printToScreen(text, cls = '') {
-  if (!text) return;
+  if (text === null || text === undefined || text === '') return;
   const screen = document.getElementById('game-screen');
   const div = document.createElement('div');
-  div.className = 'output-line ' + cls;
+  div.className = 'output-line' + (cls ? ' ' + cls : '');
   div.textContent = text;
   screen.appendChild(div);
   screen.scrollTop = screen.scrollHeight;
+}
+
+function flushBuffer() {
+  if (outputBuffer.trim()) {
+    // Split on newlines so each line is its own element (preserves formatting)
+    outputBuffer.split('\n').forEach(line => printToScreen(line));
+  }
+  outputBuffer = '';
 }
 
 function showPage(id, btn) {
@@ -192,91 +203,145 @@ function showPage(id, btn) {
   }
 }
 
-// ─── THE GLK SHIM ───────────────────────────────────────────────────────────
-// We define this globally and on the engine instance to satisfy the interpreter.
-const glkShim = {
-  window_open: () => 1,
-  window_clear: () => { document.getElementById('game-screen').innerHTML = ''; },
-  window_get_rock: () => 0,
-  window_get_size: () => ({width: 80, height: 24}),
-  set_window: () => {},
-  stream_set_current: () => {},
-  window_move_cursor: () => {},
-  put_string: (text) => printToScreen(text),
-  put_char: (c) => printToScreen(String.fromCharCode(c)),
-  char_to_lower: (c) => String.fromCharCode(c).toLowerCase().charCodeAt(0),
-  char_to_upper: (c) => String.fromCharCode(c).toUpperCase().charCodeAt(0),
-  select: (ev) => { if (currentEngine && currentEngine.on_select) currentEngine.on_select(ev); },
-  request_line_event: () => {}, // Handled by our UI
-  fatal_error: (msg) => printToScreen("ENGINE FATAL: " + msg, 'error')
-};
-
-// Map it globally just in case
-window.Glk = glkShim;
-
-async function startGame(id) {
-  const g = GAMES.find(x => x.id === id);
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.getElementById('main-nav').style.display = 'none';
-  document.getElementById('game-player').classList.add('active');
-  document.getElementById('game-screen').innerHTML = '';
-  
-  printToScreen('--- ENGINE COLD BOOT ---', 'system');
-
-  try {
-    const response = await fetch(`./scripts/${g.file}?v=${Date.now()}`);
-    if (!response.ok) throw new Error("File not found in /scripts/");
-    const buffer = await response.arrayBuffer();
-    const data = new Uint8Array(buffer);
-
-    // 1. Instantiate
-    currentEngine = new ZVM();
-
-    // 2. Attach Glk bridge directly to instance BEFORE prepare
-    currentEngine.glk = glkShim;
-
-    // 3. Define UI Environment
-    const myUI = {
-      glk: glkShim,
-      print: (text) => printToScreen(text),
-      updateStatus: (loc, sc, mv) => {
-        document.getElementById('status-location').textContent = 'LOCATION: ' + loc.toUpperCase();
-        document.getElementById('status-score').textContent = `SCORE: ${sc} | MOVES: ${mv}`;
-      }
-    };
-
-    // 4. Run
-    currentEngine.prepare(data, myUI);
-    printToScreen('Engine Ready. Launching Story...', 'success');
-    currentEngine.run();
-    document.getElementById('game-input').focus();
-
-  } catch (err) {
-    printToScreen('BOOT FAILURE: ' + err.message, 'error');
-    console.error("ZVM Error:", err);
-  }
+// ─── INPUT: keyboard → engine ────────────────────────────────────────────────
+// The engine calls our getLine() which returns a Promise. We store the resolve
+// handle; when the player presses Enter we call it with the typed string.
+function waitForInput() {
+  return new Promise(resolve => { inputResolve = resolve; });
 }
 
 function submitCommand() {
   const inp = document.getElementById('game-input');
   const cmd = inp.value.trim();
-  if (!cmd || !currentEngine) return;
-
-  printToScreen('> ' + cmd.toUpperCase(), 'player-input');
+  if (!inputResolve) return;   // engine not waiting yet — ignore
+  printToScreen('> ' + cmd, 'player-input');
   inp.value = '';
-
-  // Standard ifvms input delivery
-  if (currentEngine.deliver_input) {
-    currentEngine.deliver_input(cmd);
-  } else if (currentEngine.provideInput) {
-    currentEngine.provideInput(cmd);
-  }
+  const cb = inputResolve;
+  inputResolve = null;
+  cb(cmd);
 }
 
 document.getElementById('game-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') submitCommand();
 });
 
+// ─── IFVMS GLKOTE-STYLE API ──────────────────────────────────────────────────
+// ifvms.js (ZVM) expects a `io` object that speaks the GlkOte Update protocol.
+// The only two methods it actually CALLS are:
+//   io.init(opts)                   – called once at startup
+//   io.update(data)                 – called after every VM cycle with output+events
+//
+// We respond to line-input requests by resolving via our Promise bridge.
+
+function buildIO() {
+  return {
+    // Called once by ZVM with metadata. We just acknowledge.
+    init(opts) {
+      // opts.vm is a back-reference to the ZVM instance – handy but not required
+    },
+
+    // Called by ZVM with a GlkOte Update object:
+    // { type: 'update', windows: [...], content: [...], input: [...] }
+    update(data) {
+      if (!data) return;
+
+      // ── 1. Collect text output ───────────────────────────────────────────
+      if (data.content) {
+        for (const contentBlock of data.content) {
+          // Each block targets a window; text lives in .text[] as run objects
+          if (!contentBlock.text) continue;
+          for (const run of contentBlock.text) {
+            if (typeof run === 'string') {
+              outputBuffer += run;
+            } else if (run && typeof run.text === 'string') {
+              outputBuffer += run.text;
+            }
+          }
+        }
+        flushBuffer();
+      }
+
+      // ── 2. Update status bar from window 1 (upper window) ───────────────
+      if (data.windows) {
+        const upper = data.windows.find(w => w.rock === 1 || w.id === 1);
+        if (upper && upper.gridwidth) {
+          // Status text is in content targeting this window – already printed above.
+          // For Zork's status line we parse from the content block if present.
+        }
+      }
+
+      // ── 3. Handle input requests ─────────────────────────────────────────
+      if (data.input) {
+        for (const req of data.input) {
+          if (req.type === 'line') {
+            // Engine wants a line of text. Hand back a Promise.
+            waitForInput().then(userText => {
+              vm.externalInput(req.id !== undefined ? req.id : 0, userText);
+            });
+            return; // Don't process further until player responds
+          }
+        }
+      }
+
+      // ── 4. Handle errors / exit ──────────────────────────────────────────
+      if (data.type === 'exit') {
+        printToScreen('[ THE END ]', 'success');
+        inputResolve = null;
+      }
+      if (data.type === 'error') {
+        printToScreen('ENGINE ERROR: ' + (data.message || JSON.stringify(data)), 'error');
+      }
+    }
+  };
+}
+
+// ─── GAME LAUNCH ─────────────────────────────────────────────────────────────
+async function startGame(id) {
+  const g = GAMES.find(x => x.id === id);
+  if (!g) return;
+
+  // Reset UI
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('main-nav').style.display = 'none';
+  document.getElementById('game-player').classList.add('active');
+  document.getElementById('game-screen').innerHTML = '';
+  inputResolve = null;
+  outputBuffer = '';
+
+  printToScreen('--- ENGINE COLD BOOT ---', 'system');
+  printToScreen('Load Address: ' + g.file, 'system');
+
+  try {
+    // Fetch the story file (serve from same directory as index.html)
+    const response = await fetch(`./${g.file}?v=${Date.now()}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${g.file}`);
+    const buffer = await response.arrayBuffer();
+
+    // ifvms.ZVM.load() is the correct entry point.
+    // It takes { data: ArrayBuffer, io: GlkOteIO, Dialog: ... }
+    // Dialog is needed only for SAVE/RESTORE; we supply a stub.
+    const Dialog = {
+      open(saving, label, formats, callback) { callback(null); },
+      save(data, callback) { callback(1); },
+      load(callback) { callback(null); }
+    };
+
+    const io = buildIO();
+
+    vm = new ZVM();
+    vm.prepare(buffer, { io, Dialog });
+    vm.run();
+
+    printToScreen('Engine running. Awaiting story output...', 'system');
+    document.getElementById('game-input').focus();
+
+  } catch (err) {
+    printToScreen('BOOT FAILURE: ' + err.message, 'error');
+    console.error('[ZVM]', err);
+  }
+}
+
+// ─── BUILD GAME CARDS ────────────────────────────────────────────────────────
 const grid = document.getElementById('game-grid');
 GAMES.forEach(g => {
   const card = document.createElement('div');
