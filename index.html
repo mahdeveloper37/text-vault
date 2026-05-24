@@ -692,11 +692,11 @@ async function startGame(id) {
     if (currentEngine.set_ui) currentEngine.set_ui(myUI);
 
     // 3. VALIDATE HEADER BEFORE BOOTING
-    if (data.length % 128 !== 0) {
-        print("CRITICAL: File is corrupted/truncated.", 'error');
-        print("Reason: Size is not a multiple of 128.", 'error');
-        return; // Stop here so we don't trigger the undefined crash
-    }
+    //if (data.length % 128 !== 0) {
+    //    print("CRITICAL: File is corrupted/truncated.", 'error');
+    //    print("Reason: Size is not a multiple of 128.", 'error');
+    //    return; // Stop here so we don't trigger the undefined crash
+    //}
 
     print('Checking Z-Code integrity...', 'system');
     currentEngine.init(data); 
