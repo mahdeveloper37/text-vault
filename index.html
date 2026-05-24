@@ -218,14 +218,18 @@ const GAMES = [
     id: 'zork1',
     title: 'ZORK I: THE GREAT UNDERGROUND EMPIRE',
     author: 'Infocom',
-    file: 'zork1.z3'
+    file: 'scripts/zork1.z3'
   }
 ];
 
 function getStoryURL(file) {
-  // Absolute URL so Parchment can fetch it cross-origin from iplayif.com
-  const base = window.location.href.replace(/\/[^/]*$/, '/');
-  return base + file;
+  // Build absolute URL relative to the page's directory.
+  // window.location.pathname for https://mahfran1998.github.io/text-vault/
+  // may end in '/' or in 'index.html' — handle both.
+  const loc = window.location;
+  let dir = loc.origin + loc.pathname;
+  if (!dir.endsWith('/')) dir = dir.substring(0, dir.lastIndexOf('/') + 1);
+  return dir + file;
 }
 
 function showPage(id, btn) {
