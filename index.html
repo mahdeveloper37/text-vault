@@ -251,7 +251,7 @@ function startGame(id) {
   document.getElementById('player-wrapper').classList.add('active');
 
   // Point the iframe at Parchment with our story file URL
-  const storyURL = getStoryURL(./scripts/g.file);
+  const storyURL = getStoryURL(g.file);
   const parchmentURL = 'https://iplayif.com/?story=' + encodeURIComponent(storyURL);
   document.getElementById('parchment-frame').src = parchmentURL;
 }
