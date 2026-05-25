@@ -242,14 +242,7 @@
     "title": "Zork I: The Great Underground Empire",
     "author": "Marc Blank and Dave Lebling",
     "genre": "Infocom - Z-MACHINE",
-    "desc": "The classic dungeon crawl that started it all in the Great Underground Empire."
-  },
-  {
-    "file": "scripts/zork1.z3",
-    "title": "Zork I: The Great Underground Empire",
-    "author": "Marc Blank and Dave Lebling",
-    "genre": "Infocom - Z-MACHINE",
-    "desc": "You are standing west of a white house, with a boarded front door. Your quest: plunder the Great Underground Empire of its 19 treasures."
+    "desc": "You are standing west of a white house. Your quest: plunder the Great Underground Empire of its 19 treasures. The classic dungeon crawl that started it all!"
   },
   {
     "file": "scripts/Zork2-TheWizardOfFrobozz.z3",
