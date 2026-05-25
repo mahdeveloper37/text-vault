@@ -191,7 +191,7 @@
     .about-section .cmd-list { columns: 1; }
   }
 
-  /* PLAYER WRAPPER */
+  /* ── PLAYER WRAPPER ── */
   #player-wrapper {
     display: none;
     flex-direction: column;
@@ -227,6 +227,10 @@
     letter-spacing: 1px;
   }
 
+  /*
+   * The Parchment iframe fills a fixed-height box so it looks like a terminal.
+   * We give it a minimum height so the game is playable without scrolling.
+   */
   #parchment-frame {
     width: 100%;
     height: 75vh;
@@ -252,10 +256,12 @@
 </nav>
 
 <main>
+  <!-- ARCADE PAGE -->
   <div class="page active" id="page-arcade">
     <div class="game-grid" id="game-grid"></div>
   </div>
 
+  <!-- HOW TO PLAY -->
   <div class="page" id="page-about">
     <div class="about-content">
       <div class="ascii-art">
@@ -300,11 +306,16 @@
     </div>
   </div>
 
+  <!-- PARCHMENT PLAYER -->
   <div id="player-wrapper">
     <div class="player-topbar">
       <button class="back-btn" onclick="closePlayer()">← BACK</button>
       <span class="player-title" id="player-title"></span>
     </div>
+    <!--
+      Parchment is loaded inside an iframe so its styles/scripts don't
+      interfere with ours. We pass the story URL as a query parameter.
+    -->
     <iframe id="parchment-frame"
             title="Game Player"
             allowfullscreen>
@@ -313,7 +324,7 @@
 </main>
 
 <script>
-// Helpers
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function getBaseURL() {
   const loc = window.location;
   let dir = loc.origin + loc.pathname;
@@ -352,8 +363,10 @@ function closePlayer() {
   showPage('arcade', document.querySelector('nav button'));
 }
 
-// Card renderer - Updated layout and high-contrast styles
+// ── Card renderer ─────────────────────────────────────────────────────────────
 function buildCard(game) {
+  // game = { file, title, author, genre, desc }
+  // All fields except `file` are optional — we fall back to sensible defaults.
   const file   = game.file;
   const title  = game.title  || fileToTitle(file);
   const author = game.author || 'Unknown';
@@ -363,26 +376,12 @@ function buildCard(game) {
   const card = document.createElement('div');
   card.className = 'game-card';
   card.onclick = () => startGame(file, title);
-  
   card.innerHTML = `
-    <div class="card-title" style="margin-top:0; font-size: 1.8rem; color: var(--green);">${title}</div>
-    <div style="color: var(--amber); font-family: 'VT323', monospace; font-size: 1rem; margin-bottom: 0.8rem; letter-spacing: 1px;">
-      BY ${author.toUpperCase()}
-    </div>
-    ${desc ? `
-      <div style="
-        color: #e0ffe0; 
-        font-size: 0.95rem; 
-        line-height: 1.5; 
-        margin-bottom: 1.2rem; 
-        text-shadow: 0 0 5px rgba(0, 255, 65, 0.2);
-        font-family: 'Share Tech Mono', monospace;
-      ">
-        ${desc}
-      </div>` : ''}
-    
-    <div style="border-top: 1px solid var(--border); padding-top: 0.8rem; display: flex; justify-content: space-between; align-items: center;">
-      <span style="color: var(--text-dim); font-size: 0.7rem; letter-spacing: 1px;">[ ${genre} ]</span>
+    <div class="card-label">◆ ${genre}</div>
+    <div class="card-title">${title}</div>
+    <div style="color:var(--text-dim);font-size:0.75rem;margin-bottom:0.5rem;">by ${author}</div>
+    ${desc ? `<div style="color:var(--green-dim);font-size:0.8rem;line-height:1.6;margin-bottom:0.8rem;">${desc}</div>` : ''}
+    <div style="border-top:1px solid var(--border);padding-top:0.6rem;text-align:right;">
       <button class="play-btn" onclick="event.stopPropagation();startGame('${file}','${title.replace(/'/g,"\\'")}')">▶ PLAY</button>
     </div>
   `;
@@ -390,17 +389,22 @@ function buildCard(game) {
 }
 
 function fileToTitle(file) {
+  // "scripts/zork1.z3" → "ZORK1"
   return file.split('/').pop().replace(/\.[^.]+$/, '').toUpperCase();
 }
 
 function formatToGenre(file) {
   const ext = file.split('.').pop().toLowerCase();
-  const map = { z3:'Z-MACHINE', z4:'Z-MACHINE', z5:'Z-MACHINE', z6:'Z-MACHINE', z8:'Z-MACHINE', zblorb:'BLORB', gblorb:'BLORB', ulx:'GLULX' };
+  const map = { z3:'Z-MACHINE', z5:'Z-MACHINE', z8:'Z-MACHINE', zblorb:'BLORB', gblorb:'BLORB', ulx:'GLULX' };
   return map[ext] || 'INTERACTIVE FICTION';
 }
 
+// ── Arcade loader ─────────────────────────────────────────────────────────────
+// We try to fetch scripts/manifest.json first.
+// If it's missing we fall back to a hardcoded list of known files so the
+// page is never blank.
 const FALLBACK_GAMES = [
-  { file: 'scripts/zork1.z3', title: 'ZORK I: THE GREAT UNDERGROUND EMPIRE', author: 'Marc Blank and Dave Lebling', genre: 'Z-MACHINE', desc: 'The classic dungeon crawl that started it all.' }
+  { file: 'scripts/zork1.z3', title: 'ZORK I: THE GREAT UNDERGROUND EMPIRE', author: 'Infocom', genre: 'FANTASY' }
 ];
 
 async function loadArcade() {
@@ -413,8 +417,10 @@ async function loadArcade() {
     const res = await fetch(getBaseURL() + 'scripts/manifest.json?v=' + Date.now());
     if (!res.ok) throw new Error('no manifest');
     games = await res.json();
+    // Normalise: manifest can be an array of objects OR an array of filename strings
     games = games.map(g => typeof g === 'string' ? { file: 'scripts/' + g } : g);
   } catch (_) {
+    // Manifest missing — use fallback
     games = FALLBACK_GAMES;
   }
 
